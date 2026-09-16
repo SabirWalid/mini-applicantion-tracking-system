@@ -10,9 +10,10 @@ Talentflow is a focused mini applicant-tracking system for a first recruiting te
 - Pipeline: compact Applied, Screening, Interview, and Offer Kanban columns.
 - Filtering by job and candidate name.
 - Move candidates between stages from each card.
-- Admin team/access view.
+- Admin team/access view with protected account invitations for admin and customer roles.
 - Supabase migration with organizations, memberships, jobs, candidates, profile trigger, and RLS policies.
 - `supabase/functions/assess-candidate` as a secure starting point for CV assessment.
+- `supabase/functions/admin-create-user` for admin-only Supabase Auth invitations and workspace membership assignment.
 
 ## Local development
 
@@ -37,8 +38,9 @@ Without Supabase environment variables the app runs in demo mode. Use any email/
 1. Create a Supabase project and copy the project URL and anon key into `.env.local`.
 2. Run `supabase/migrations/20260916000000_initial_schema.sql` in the Supabase SQL editor, or apply it with the Supabase CLI.
 3. Create the first user in Supabase Auth, then run the two bootstrap inserts at the bottom of the migration with that user ID and the new organization ID.
-4. Create additional users through Supabase Auth. An admin can add their `memberships` row with role `customer` or `admin`.
-5. For production, replace the deterministic scorer in `supabase/functions/assess-candidate/index.ts` with an LLM provider call using a Supabase secret. Ask the model for structured JSON containing `score`, `strengths`, `gaps`, and `summary`, validate it, then persist only the structured result on `candidates`.
+4. Deploy both functions: `supabase functions deploy assess-candidate` and `supabase functions deploy admin-create-user`.
+5. Use the Team & access screen as an admin to invite customer or admin accounts. The function uses the service-role key server-side, verifies the caller's admin membership, and never exposes that key to React.
+6. For production, replace the deterministic scorer in `supabase/functions/assess-candidate/index.ts` with an LLM provider call using a Supabase secret. Ask the model for structured JSON containing `score`, `strengths`, `gaps`, and `summary`, validate it, then persist only the structured result on `candidates`.
 
 ## Vercel deployment
 
@@ -50,7 +52,7 @@ Without Supabase environment variables the app runs in demo mode. Use any email/
 ## Product assumptions
 
 - A workspace belongs to one customer organization; users access it through `memberships`.
-- Admin means a workspace-level admin, not a global super-admin. Global account creation can be added through a protected server-side admin function when the first customer needs it.
+- Admin means a workspace-level admin for the current organization. Admins can invite accounts into that organization; global cross-organization provisioning is intentionally out of scope.
 - Candidate resume uploads are represented by `resume_url`; add a private Supabase Storage bucket and signed URLs before handling real CVs.
 - The initial AI assessment is advisory only. Recruiters remain responsible for decisions, and the assessment should never be used as the sole basis for rejecting a candidate.
 
@@ -59,7 +61,8 @@ Without Supabase environment variables the app runs in demo mode. Use any email/
 - [x] React frontend and responsive interaction layer
 - [x] Supabase schema, auth integration, and RLS policies
 - [x] Vercel configuration and environment template
-- [x] AI assessment implementation path
+- [x] AI assessment implementation path and candidate CV text entry
+- [x] Admin-only account invitation function
 - [ ] Create live Supabase project and add production secrets
 - [ ] Push to GitHub and connect Vercel
 - [ ] Record a Loom walkthrough after the deployment URL exists
