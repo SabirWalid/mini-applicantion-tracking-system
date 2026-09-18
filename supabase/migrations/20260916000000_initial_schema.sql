@@ -11,6 +11,8 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text,
   role public.app_role not null default 'customer',
+  access_granted_at timestamptz,
+  access_granted_by uuid references auth.users(id),
   created_at timestamptz not null default now()
 );
 
@@ -52,6 +54,17 @@ create table public.candidates (
 create index jobs_org_idx on public.jobs(organization_id);
 create index candidates_org_idx on public.candidates(organization_id);
 create index candidates_job_idx on public.candidates(job_id);
+
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'jobs') then
+    alter publication supabase_realtime add table public.jobs;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'candidates') then
+    alter publication supabase_realtime add table public.candidates;
+  end if;
+end;
+$$;
 
 create or replace function public.is_org_member(target_org uuid)
 returns boolean language sql stable security definer set search_path = public as $$

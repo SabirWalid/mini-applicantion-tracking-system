@@ -4,9 +4,13 @@ Talentflow is a focused mini applicant-tracking system for a first recruiting te
 
 ## Included
 
-- Customer and admin sign-in flow. Admins are identified by the `admin` role in the database; demo mode treats an email beginning with `admin` as an admin.
+- Customer and admin sign-in flow. Admins are identified only by the `admin` role in the database membership.
+- New users see the sign-up form first. Sign-in requires a valid Supabase Auth account and a matching workspace membership.
+- Admins receive a separate Admin Dashboard entry with workspace metrics and controls for pipeline, jobs, candidates, and team access. Customers never receive that entry.
+- Confirmed customer sign-ups appear in the admin dashboard's Access requests queue. An admin can grant customer access; the customer sees an approval notification on their next sign-in.
 - Jobs: post and list active recruiting roles.
 - Candidates: add profile basics, link a LinkedIn profile, and associate candidates with jobs.
+- Candidate CVs can be pasted or uploaded as PDF, DOCX, TXT, Markdown, or RTF; selectable text is extracted in the browser before assessment. Scanned image-only PDFs require OCR.
 - Pipeline: compact Applied, Screening, Interview, and Offer Kanban columns.
 - Filtering by job and candidate name.
 - Move candidates between stages from each card.
@@ -31,22 +35,42 @@ On Windows PowerShell, copy the environment template with:
 Copy-Item .env.example .env.local
 ```
 
-Without Supabase environment variables the app runs in demo mode. Use any email/password; prefix the email with `admin` to preview the admin navigation. This mode is intentionally local-only and does not persist data.
+Supabase must be configured for sign-up and sign-in. The app does not provide a demo authentication bypass, and an email address can never grant admin access.
 
 ## Supabase setup
 
 1. Create a Supabase project and copy the project URL and anon key into `.env.local`.
+	The variable names must be exactly `MINI-ATS_SUPABASE_URL` and `MINI-ATS_SUPABASE_ANON_KEY`; never put a service-role key in the frontend environment.
+	Keep these hyphenated variables in `.env.local`, not `.env`: the Supabase CLI parses `.env` as a dotenv file and rejects hyphens in variable names.
 2. Run `supabase/migrations/20260916000000_initial_schema.sql` in the Supabase SQL editor, or apply it with the Supabase CLI.
 3. Create the first user in Supabase Auth, then run the two bootstrap inserts at the bottom of the migration with that user ID and the new organization ID.
-4. Deploy both functions: `supabase functions deploy assess-candidate` and `supabase functions deploy admin-create-user`.
-5. Use the Team & access screen as an admin to invite customer or admin accounts. The function uses the service-role key server-side, verifies the caller's admin membership, and never exposes that key to React.
-6. For production, replace the deterministic scorer in `supabase/functions/assess-candidate/index.ts` with an LLM provider call using a Supabase secret. Ask the model for structured JSON containing `score`, `strengths`, `gaps`, and `summary`, validate it, then persist only the structured result on `candidates`.
+4. Install the Supabase CLI, authenticate, and link this folder to your project. Replace `YOUR_PROJECT_REF` with the project reference from the Supabase dashboard URL:
+	```powershell
+	npx supabase login
+	npx supabase link --project-ref YOUR_PROJECT_REF
+	```
+5. Configure the AI provider as a Supabase secret. Never put this key in `.env`, `.env.local`, Vercel frontend variables, or React code:
+	```powershell
+	npx supabase secrets set OPENAI_API_KEY=your-openai-api-key OPENAI_MODEL=gpt-4o-mini
+	```
+6. Deploy all functions from the repository root:
+	```powershell
+	npx supabase functions deploy assess-candidate
+	npx supabase functions deploy admin-create-user
+	npx supabase functions deploy admin-manage-access
+	```
+	Inspect the assessment function if it fails:
+	```powershell
+	npx supabase functions logs assess-candidate
+	```
+7. New sign-ups create an Auth user and profile, but do not automatically grant workspace access. Add their row to `memberships`, or invite them from Team & access as an admin, before they can sign in.
+8. Use the Team & access screen as an admin to invite customer or admin accounts. The function uses the service-role key server-side, verifies the caller's admin membership, and never exposes that key to React.
 
 ## Vercel deployment
 
 1. Push this repository to GitHub.
 2. Import it into Vercel as a Vite project.
-3. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as Production and Preview environment variables.
+3. Add `MINI-ATS_SUPABASE_URL` and `MINI-ATS_SUPABASE_ANON_KEY` as Production and Preview environment variables.
 4. Deploy. `vercel.json` provides the SPA fallback for direct navigation.
 
 ## Product assumptions
