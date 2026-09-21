@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BarChart3, BriefcaseBusiness, ChevronDown, ClipboardList, ExternalLink, Filter, Globe2, LogOut, Plus, Search, Settings, ShieldCheck, Sparkles, UserPlus, Users, X } from 'lucide-react'
+import { BarChart3, BriefcaseBusiness, ChevronDown, ClipboardList, ExternalLink, Filter, Globe2, LogOut, Plus, Search, ShieldCheck, Sparkles, UserPlus, Users, X } from 'lucide-react'
 import * as mammoth from 'mammoth'
 import * as pdfjsLib from 'pdfjs-dist'
 import { supabase } from './lib/supabase'
@@ -40,13 +40,13 @@ async function extractCvText(file: File) {
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
-  const [email, setEmail] = useState('demo@talentflow.io')
-  const [password, setPassword] = useState('password')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
   const [authError, setAuthError] = useState('')
   const [authNotice, setAuthNotice] = useState('')
-  const [jobs, setJobs] = useState<Job[]>(seedJobs)
-  const [candidates, setCandidates] = useState<Candidate[]>(seedCandidates)
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [candidates, setCandidates] = useState<Candidate[]>([])
   const [view, setView] = useState('Pipeline')
   const [jobFilter, setJobFilter] = useState('all')
   const [nameFilter, setNameFilter] = useState('')
@@ -59,9 +59,10 @@ function App() {
   async function signIn(event: React.FormEvent) {
     event.preventDefault(); setAuthError(''); setAuthNotice('')
     if (!supabase) { setAuthError('Supabase is not configured. Connect the database before signing in.'); return }
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
     if (error || !data.user) { setAuthError(error?.message ?? 'Unable to sign in'); return }
-    const { data: membership } = await supabase.from('memberships').select('organization_id, role').eq('user_id', data.user.id).limit(1).maybeSingle()
+    const { data: membership, error: membershipError } = await supabase.from('memberships').select('organization_id, role').eq('user_id', data.user.id).limit(1).maybeSingle()
+    if (membershipError) { await supabase.auth.signOut(); setAuthError(`Unable to load workspace access: ${membershipError.message}`); return }
     if (!membership) { await supabase.auth.signOut(); setAuthError('Your account exists, but it is not connected to a workspace yet. Ask an admin to add your membership.'); return }
     const nextSession = { email: data.user.email ?? email, role: membership.role as Role, userId: data.user.id, organizationId: membership.organization_id }
     setSession(nextSession)
@@ -73,7 +74,7 @@ function App() {
   async function signUp(event: React.FormEvent) {
     event.preventDefault(); setAuthError(''); setAuthNotice('')
     if (!supabase) { setAuthError('Connect Supabase before creating a real account.'); return }
-    const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: fullName } } })
+    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { full_name: fullName.trim() }, emailRedirectTo: window.location.origin } })
     if (error) { setAuthError(error.message); return }
     if (data.session) {
       await supabase.auth.signOut()
@@ -152,7 +153,16 @@ function App() {
   const activeView = session.role === 'admin' || view !== 'Admin Dashboard' ? view : 'Pipeline'
   const filtered = candidates.filter(candidate => (jobFilter === 'all' || candidate.jobId === jobFilter) && candidate.name.toLowerCase().includes(nameFilter.toLowerCase()))
   const jobName = (id: string) => jobs.find(job => job.id === id)?.title ?? 'Unknown role'
-  const moveCandidate = async (id: string, stage: Stage) => { setCandidates(current => current.map(candidate => candidate.id === id ? { ...candidate, stage } : candidate)); if (supabase && session.organizationId) await supabase.from('candidates').update({ stage }).eq('id', id).eq('organization_id', session.organizationId) }
+  const moveCandidate = async (id: string, stage: Stage) => {
+    const previousStage = candidates.find(candidate => candidate.id === id)?.stage
+    setCandidates(current => current.map(candidate => candidate.id === id ? { ...candidate, stage } : candidate))
+    if (!supabase || !session.organizationId) return
+    const { error } = await supabase.from('candidates').update({ stage }).eq('id', id).eq('organization_id', session.organizationId)
+    if (error) {
+      setCandidates(current => current.map(candidate => candidate.id === id ? { ...candidate, stage: previousStage ?? candidate.stage } : candidate))
+      setNotice(`Candidate stage could not be updated: ${error.message}`)
+    }
+  }
   const assess = async (candidateId: string, resumeText: string, jobDescription: string) => {
     if (!supabase) { setNotice('Assessment requires a Supabase connection.'); return null }
     setAssessmentBusy(true)
@@ -163,7 +173,7 @@ function App() {
         setNotice(details || `Assessment failed: ${error.message}`)
         return null
       }
-      if (!data?.score || !data?.summary) { setNotice('Assessment returned an incomplete result. Redeploy the assess-candidate function.'); return null }
+      if (!Number.isInteger(data?.score) || !data?.summary) { setNotice('Assessment returned an incomplete result. Redeploy the assess-candidate function.'); return null }
       if (session.organizationId) {
         const { error: updateError } = await supabase.from('candidates').update({ ai_score: data.score, ai_summary: data.summary }).eq('id', candidateId).eq('organization_id', session.organizationId)
         if (updateError) { setNotice(`Assessment succeeded, but the note could not be saved: ${updateError.message}`); return null }
@@ -190,7 +200,7 @@ function App() {
     if (resumeText.trim() && assessmentGenerated) setNotice('Candidate saved and AI note generated.')
   }
   const saveJob = async (job: Omit<Job, 'id' | 'status'>) => { let saved: Job = { ...job, id: crypto.randomUUID(), status: 'Active' }; if (supabase && session.organizationId && session.userId) { const { data, error } = await supabase.from('jobs').insert({ ...job, organization_id: session.organizationId, created_by: session.userId }).select('id,status').single(); if (error) { setNotice(error.message); return }; saved = { ...saved, id: data.id, status: data.status } }; setJobs(current => [...current, saved]); setModal(null) }
-  const createAccount = async (account: { email: string; fullName: string; role: Role; organizationName: string }) => { if (!supabase || !session.userId) { setNotice('Demo mode: account creation is shown but not persisted.'); setModal(null); return }; const { error } = await supabase.functions.invoke('admin-create-user', { body: account }); setNotice(error ? error.message : `${account.email} was invited successfully.`); setModal(null) }
+  const createAccount = async (account: { email: string; fullName: string; role: Role }) => { if (!supabase || !session.userId) return; const { error } = await supabase.functions.invoke('admin-create-user', { body: account }); setNotice(error ? error.message : `${account.email} was invited successfully.`); if (!error) setModal(null) }
   const approveUser = async (userId: string, role: Role) => { if (!supabase) return; const { error } = await supabase.functions.invoke('admin-manage-access', { body: { action: 'approve', userId, role } }); if (error) { setNotice(`Unable to approve access: ${error.message}`); return }; setPendingUsers(current => current.filter(user => user.id !== userId)); setNotice('Access approved. The customer can now sign in to the workspace.') }
   const deleteAccount = async () => { if (!supabase) return false; const { error } = await supabase.functions.invoke('delete-account', { body: {} }); if (error) { setNotice(`Unable to delete account: ${error.message}`); return false }; await supabase.auth.signOut(); setSession(null); return true }
 
@@ -213,6 +223,6 @@ function AdminDashboard({ jobs, candidates, pendingUsers, onApproveUser, onNavig
 function Team({ session, onAdd }: { session: Session; onAdd: () => void }) { const [members, setMembers] = useState<WorkspaceMember[]>([]); const [loading, setLoading] = useState(true); const [errorMessage, setErrorMessage] = useState(''); const [refreshKey, setRefreshKey] = useState(0); useEffect(() => { if (!supabase || session.role !== 'admin') return; const client = supabase; setLoading(true); setErrorMessage(''); const loadMembers = async () => { const { data, error } = await client.functions.invoke('admin-manage-access', { body: { action: 'members' } }); if (error) { setErrorMessage(error.message); setMembers([]) } else setMembers((data?.members ?? []) as WorkspaceMember[]); setLoading(false) }; void loadMembers() }, [session.role, session.organizationId, refreshKey]); return <section className="team-card"><div className="team-header"><div><h2>Team & access</h2><p>Manage members connected to this workspace.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}>Refresh</button><button className="button primary" onClick={onAdd}><UserPlus size={16} />Create account</button></div></div>{loading ? <p className="muted">Loading workspace members...</p> : errorMessage ? <p className="form-error">Unable to load members: {errorMessage}. Deploy the updated admin-manage-access function.</p> : members.length === 0 ? <p className="muted">No workspace members found yet.</p> : members.map(member => <div className="team-row" key={member.id}><div className="avatar">{member.fullName.slice(0, 2).toUpperCase()}</div><div><strong>{member.fullName}</strong><span>{member.email}</span></div><span className="role">{member.role}</span></div>)}</section> }
 function CandidateModal({ jobs, onClose, onSave, assessmentBusy }: { jobs: Job[]; onClose: () => void; onSave: (candidate: Candidate, resumeText: string, jobDescription: string) => void; assessmentBusy: boolean }) { const [name, setName] = useState(''); const [jobId, setJobId] = useState(jobs[0]?.id ?? ''); const [location, setLocation] = useState(''); const [linkedin, setLinkedin] = useState(''); const [email, setEmail] = useState(''); const [resume, setResume] = useState(''); const [fileName, setFileName] = useState(''); const [fileError, setFileError] = useState(''); const job = jobs.find(item => item.id === jobId); const handleFile = async (file?: File) => { if (!file) return; setFileError(''); setFileName(file.name); try { const text = await extractCvText(file); if (!text.trim()) throw new Error('No selectable text was found. Scanned PDFs need OCR before upload.'); setResume(text); } catch (error) { setFileName(''); setFileError(error instanceof Error ? error.message : 'Unable to read this CV file.'); } }; return <Modal title="Add candidate" onClose={onClose}><p className="muted">Paste a CV or upload a PDF, DOCX, TXT, Markdown, or RTF file to generate an AI assessment.</p><label>Full name<input autoFocus value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Taylor Morgan" /></label><label>Role<select value={jobId} onChange={event => setJobId(event.target.value)}>{jobs.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} placeholder="taylor@example.com" /></label><label>Location<input value={location} onChange={event => setLocation(event.target.value)} placeholder="e.g. Austin, TX" /></label><label>LinkedIn URL<input type="url" value={linkedin} onChange={event => setLinkedin(event.target.value)} placeholder="https://linkedin.com/in/..." /></label><label>Upload CV<input type="file" accept=".pdf,.docx,.txt,.md,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={event => void handleFile(event.target.files?.[0])} disabled={assessmentBusy} />{fileName && <span className="field-hint">Loaded: {fileName}</span>}{fileError && <span className="form-error">{fileError}</span>}</label><label>CV text <span className="field-hint">paste or edit extracted text</span><textarea value={resume} onChange={event => setResume(event.target.value)} placeholder="Paste resume text or upload a CV above" /></label><div className="modal-actions"><button className="button secondary" onClick={onClose} disabled={assessmentBusy}>Cancel</button><button className="button primary" disabled={!name || !jobId || assessmentBusy} onClick={() => onSave({ id: crypto.randomUUID(), name, jobId, stage: 'Applied', location: location || 'Location not added', initials: name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase(), score: 0, added: 'Just now', linkedin: linkedin || undefined, email: email || undefined }, resume, job?.description ?? job?.title ?? '')}>{assessmentBusy ? 'Generating note...' : 'Add candidate'}</button></div></Modal> }
 function JobModal({ onClose, onSave }: { onClose: () => void; onSave: (job: Omit<Job, 'id' | 'status'>) => void }) { const [title, setTitle] = useState(''); const [location, setLocation] = useState('Remote'); const [description, setDescription] = useState(''); return <Modal title="Post a new role" onClose={onClose}><p className="muted">A clear brief gives the AI assessor better context.</p><label>Job title<input autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder="e.g. Product Marketing Manager" /></label><label>Location<input value={location} onChange={event => setLocation(event.target.value)} /></label><label>Job description<textarea value={description} onChange={event => setDescription(event.target.value)} placeholder="Responsibilities, must-have skills, and experience" /></label><div className="modal-actions"><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!title} onClick={() => onSave({ title, location, description })}>Post role</button></div></Modal> }
-function AccountModal({ onClose, onSave }: { onClose: () => void; onSave: (account: { email: string; fullName: string; role: Role; organizationName: string }) => void }) { const [email, setEmail] = useState(''); const [fullName, setFullName] = useState(''); const [role, setRole] = useState<Role>('customer'); const [organizationName, setOrganizationName] = useState('Acme Co.'); return <Modal title="Create workspace account" onClose={onClose}><p className="muted">An invite email is sent by Supabase Auth. The user receives access to this workspace.</p><label>Full name<input autoFocus value={fullName} onChange={event => setFullName(event.target.value)} /></label><label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} /></label><label>Role<select value={role} onChange={event => setRole(event.target.value as Role)}><option value="customer">Customer</option><option value="admin">Admin</option></select></label><label>Organization<input value={organizationName} onChange={event => setOrganizationName(event.target.value)} /></label><div className="modal-actions"><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!email || !fullName} onClick={() => onSave({ email, fullName, role, organizationName })}>Create account</button></div></Modal> }
+function AccountModal({ onClose, onSave }: { onClose: () => void; onSave: (account: { email: string; fullName: string; role: Role }) => void }) { const [email, setEmail] = useState(''); const [fullName, setFullName] = useState(''); const [role, setRole] = useState<Role>('customer'); return <Modal title="Create workspace account" onClose={onClose}><p className="muted">An invite email is sent by Supabase Auth. The user receives access to this workspace.</p><label>Full name<input autoFocus value={fullName} onChange={event => setFullName(event.target.value)} /></label><label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} /></label><label>Role<select value={role} onChange={event => setRole(event.target.value as Role)}><option value="customer">Customer</option><option value="admin">Admin</option></select></label><div className="modal-actions"><button className="button secondary" onClick={onClose}>Cancel</button><button className="button primary" disabled={!email || !fullName} onClick={() => onSave({ email, fullName, role })}>Create account</button></div></Modal> }
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) { return <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18} /></button></div>{children}</div></div> }
 export default App

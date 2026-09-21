@@ -25,23 +25,17 @@ Prerequisite: Node.js 20+ and npm.
 
 ```bash
 npm install
-cp .env.example .env.local
 npm run dev
 ```
 
-On Windows PowerShell, copy the environment template with:
-
-```powershell
-Copy-Item .env.example .env.local
-```
+Before running the app, create a `.env` file in the project root with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 
 Supabase must be configured for sign-up and sign-in. The app does not provide a demo authentication bypass, and an email address can never grant admin access.
 
 ## Supabase setup
 
-1. Create a Supabase project and copy the project URL and anon key into `.env.local`.
-	The variable names must be exactly `MINI-ATS_SUPABASE_URL` and `MINI-ATS_SUPABASE_ANON_KEY`; never put a service-role key in the frontend environment.
-	Keep these hyphenated variables in `.env.local`, not `.env`: the Supabase CLI parses `.env` as a dotenv file and rejects hyphens in variable names.
+1. Create a Supabase project and copy the project URL and anon key into `.env`.
+	The variable names must be exactly `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`; never put a service-role key in the frontend environment.
 2. Run `supabase/migrations/20260916000000_initial_schema.sql` in the Supabase SQL editor, or apply it with the Supabase CLI.
 3. Create the first user in Supabase Auth, then run the two bootstrap inserts at the bottom of the migration with that user ID and the new organization ID.
 4. Install the Supabase CLI, authenticate, and link this folder to your project. Replace `YOUR_PROJECT_REF` with the project reference from the Supabase dashboard URL:
@@ -49,7 +43,7 @@ Supabase must be configured for sign-up and sign-in. The app does not provide a 
 	npx supabase login
 	npx supabase link --project-ref YOUR_PROJECT_REF
 	```
-5. Configure the AI provider as a Supabase secret. Never put this key in `.env`, `.env.local`, Vercel frontend variables, or React code:
+5. Supabase automatically provides `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` to Edge Functions. Do not create frontend-style duplicate secrets for them and never expose the service-role key. Configure only the AI provider as an additional Supabase secret:
 	```powershell
 	npx supabase secrets set OPENAI_API_KEY=your-openai-api-key OPENAI_MODEL=gpt-4o-mini
 	```
@@ -70,8 +64,9 @@ Supabase must be configured for sign-up and sign-in. The app does not provide a 
 
 1. Push this repository to GitHub.
 2. Import it into Vercel as a Vite project.
-3. Add `MINI-ATS_SUPABASE_URL` and `MINI-ATS_SUPABASE_ANON_KEY` as Production and Preview environment variables.
-4. Deploy. `vercel.json` provides the SPA fallback for direct navigation.
+3. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as Production and Preview environment variables. These are public client values; never add a service-role key to Vercel.
+4. In Supabase Authentication settings, set the Site URL to the production Vercel URL and add both the production URL and Vercel preview URL pattern to Redirect URLs. Configure Google as an Auth provider there if Google sign-in should be available.
+5. Deploy. `vercel.json` provides the SPA fallback for direct navigation.
 
 ## Product assumptions
 
