@@ -86,5 +86,3 @@ Supabase must be configured for sign-up and sign-in. The app does not provide a 
 - [ ] Push to GitHub and connect Vercel
 - [ ] Record a Loom walkthrough after the deployment URL exists
 - [ ] Send customer assumptions and access details by email
-
-The last four steps need the owner's GitHub, Supabase, Vercel, Loom, and email accounts; they cannot be completed honestly from this local workspace without credentials.
