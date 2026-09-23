@@ -84,5 +84,3 @@ Supabase must be configured for sign-up and sign-in. The app does not provide a 
 - [x] Admin-only account invitation function
 - [ ] Create live Supabase project and add production secrets
 - [ ] Push to GitHub and connect Vercel
-- [ ] Record a Loom walkthrough after the deployment URL exists
-- [ ] Send customer assumptions and access details by email
